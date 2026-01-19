@@ -13,6 +13,8 @@ from sklearn.metrics import accuracy_score, confusion_matrix
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.initializers import GlorotUniform
+from tensorflow.keras.callbacks import EarlyStopping
 
 # =========================================
 # 1. LOAD DATASET
@@ -28,7 +30,8 @@ data['Target'] = data['Target'].map({
     'Enrolled': 0,
     'Graduate': 0
 })
-print("\nQ1: Target variable mapping applied (Dropout=1, Others=0)\n", data['Target'].value_counts())
+print("\nQ1: Target variable mapping applied (Dropout=1, Others=0)")
+print(data['Target'].value_counts())
 
 # =========================================
 # 3. PREPROCESSING
@@ -37,15 +40,24 @@ X = data.drop('Target', axis=1)
 y = data['Target']
 
 # Encode categorical features
+label_encoders = {}
 for col in X.select_dtypes(include='object').columns:
     le = LabelEncoder()
     X[col] = le.fit_transform(X[col])
+    label_encoders[col] = le
 
 # Normalize features
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
-print("\nQ3: Preprocessing done. First 5 rows after scaling:\n", X_scaled[:5])
+# Save preprocessed data
+X_scaled_df = pd.DataFrame(X_scaled, columns=X.columns)
+preprocessed_data = X_scaled_df.copy()
+preprocessed_data['Target'] = y.values
+preprocessed_data.to_csv("student_dropout_preprocessed.csv", index=False)
+
+print("\nQ3: Preprocessing completed")
+print("✔ Encoded & normalized data saved as 'student_dropout_preprocessed.csv'")
 
 # =========================================
 # 4. TRAIN-TEST SPLIT
@@ -53,55 +65,95 @@ print("\nQ3: Preprocessing done. First 5 rows after scaling:\n", X_scaled[:5])
 X_train, X_test, y_train, y_test = train_test_split(
     X_scaled, y, test_size=0.2, random_state=42
 )
-print("\nQ4: Train/Test split done")
+
+print("\nQ4: Train/Test split completed")
 print(" - X_train shape:", X_train.shape)
 print(" - X_test shape:", X_test.shape)
 
 # =========================================
-# 2. Q2: Input/Output neurons
+# Q2: INPUT / OUTPUT NEURONS
 # =========================================
-print("\nQ2: Number of input features (input neurons):", X_scaled.shape[1])
-print("Q2: Output neurons = 1 (binary classification: dropout or not)")
+print("\nQ2: Input neurons:", X_scaled.shape[1])
+print("Q2: Output neurons: 1 (Binary classification)")
 
 # =========================================
-# 5. INITIALIZE & DESIGN BPNN (Q5 & Q6)
+# 5. HYPERPARAMETER SETTINGS (EXPLICIT)
+# =========================================
+HIDDEN_NODES = 16
+LEARNING_RATE = 0.01
+BATCH_SIZE = 32
+EPOCHS = 100
+MAX_ERROR = 0.001  # loss threshold
+
+# =========================================
+# 6. INITIALIZE & DESIGN BPNN
 # =========================================
 model = Sequential()
-model.add(Dense(16, activation='relu', input_shape=(X_scaled.shape[1],)))  # hidden layer
-model.add(Dense(1, activation='sigmoid'))  # output layer
 
-optimizer = Adam(learning_rate=0.001)
-model.compile(optimizer=optimizer, loss='binary_crossentropy', metrics=['accuracy'])
+# Hidden layer
+model.add(Dense(
+    HIDDEN_NODES,
+    activation='relu',
+    kernel_initializer=GlorotUniform(),  # Initial weights
+    input_shape=(X_scaled.shape[1],)
+))
 
-print("\nQ5 & Q6: Model designed. Hyperparameters:")
-print(" - Hidden layer neurons: 16")
+# Output layer
+model.add(Dense(
+    1,
+    activation='sigmoid',
+    kernel_initializer=GlorotUniform()
+))
+
+# Compile model
+optimizer = Adam(learning_rate=LEARNING_RATE)
+model.compile(
+    optimizer=optimizer,
+    loss='binary_crossentropy',
+    metrics=['accuracy']
+)
+
+print("\nQ5 & Q6: BPNN Hyperparameters")
+print(" - Hidden nodes:", HIDDEN_NODES)
 print(" - Activation function (hidden): ReLU")
 print(" - Activation function (output): Sigmoid")
-print(" - Learning rate:", 0.001)
-print(" - Epochs: 100")
-print(" - Batch size: 32")
+print(" - Initial weight initialization: Glorot Uniform (Xavier)")
+print(" - Learning rate:", LEARNING_RATE)
+print(" - Batch size:", BATCH_SIZE)
+print(" - Max epochs:", EPOCHS)
+print(" - Max error (loss threshold):", MAX_ERROR)
 
-# Model summary
-print("\nQ6: Model summary:")
+print("\nQ6: Model Summary")
 model.summary()
 
 # =========================================
-# 6. TRAIN NETWORK
+# 7. TRAIN NETWORK (WITH MAX ERROR)
 # =========================================
+early_stopping = EarlyStopping(
+    monitor='loss',
+    min_delta=MAX_ERROR,
+    patience=10,
+    restore_best_weights=True
+)
+
 history = model.fit(
     X_train, y_train,
-    epochs=100,
-    batch_size=32,
+    epochs=EPOCHS,
+    batch_size=BATCH_SIZE,
     validation_split=0.1,
+    callbacks=[early_stopping],
     verbose=0
 )
-print("\nQ6: Training complete. Last training accuracy:", history.history['accuracy'][-1])
+
+print("\nQ6: Training completed")
+print(" - Final training accuracy:", history.history['accuracy'][-1])
+print(" - Total epochs used:", len(history.history['loss']))
 
 # Save model
 model.save("student_dropout_bpnn.h5")
 
 # =========================================
-# 7. TEST & EVALUATION
+# 8. TEST & EVALUATION
 # =========================================
 y_pred_prob = model.predict(X_test)
 y_pred = (y_pred_prob > 0.5).astype(int)
